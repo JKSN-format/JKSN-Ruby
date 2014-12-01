@@ -167,7 +167,9 @@ module JKSN
           raise NotImplementedError.new
         when 0xA0 # Row-col swapped arrays
           raise NotImplementedError.new
-        when 0xB0 # Delta encoded integers
+        when 0xC0 # Lengthless arrays
+          raise NotImplementedError.new
+        when 0xD0 # Delta encoded integers
           raise NotImplementedError.new
         when 0xF0 # Checksums
           raise NotImplementedError.new

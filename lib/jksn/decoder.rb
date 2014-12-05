@@ -18,6 +18,13 @@
 
 require 'stringio'
 require 'oj' rescue require 'json'
+require 'zlib'
+begin
+  require 'openssl'
+  Digest = OpenSSL::Digest
+rescue
+  require 'digest'
+end
 
 module JKSN
 

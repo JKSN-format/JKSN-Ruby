@@ -44,8 +44,8 @@ module JKSN
   class JKSNDecoder
     def initialize
       @lastint = nil
-      @texthash = [nil] * 256
-      @blobhash = [nil] * 256
+      @texthash = {}
+      @blobhash = {}
     end
 
     def loads(s, header=true)
@@ -66,6 +66,7 @@ module JKSN
       loop do
         control = io.read(1).ord
         ctrlhi = control & 0xF0
+	ctrllo = control & 0x0F
         case ctrlhi
         when 0x00 # Special values
           case control
@@ -77,7 +78,7 @@ module JKSN
             return true
           when 0x0F
             s = load_value(io)
-            raise DecoderError.new unless s.is_a? String
+            raise DecodeError.new unless s.is_a? String
             return JSON.parse s
           end
         when 0x10 # Integers
@@ -131,47 +132,84 @@ module JKSN
             return load_str(io, decode_int(io, 0) << 1, 'utf-16le')
           end
         when 0x40 # UTF-8 strings
-          case control
-          when 0x40..0x4B
-            return load_str(io, (control & 0xf) << 1, 'utf-8le')
-          when 0x4D
-            return load_str(io, decode_int(io, 2) << 1, 'utf-8le')
-          when 0x4E
-            return load_str(io, decode_int(io, 1) << 1, 'utf-8le')
-          when 0x4F
-            return load_str(io, decode_int(io, 0) << 1, 'utf-8le')
-          end
+	  len = get_length(io, control)
+          return load_str(io, len, 'utf-8le')
         when 0x50 # Blob strings
+	  len = get_length(io, control)
           case control
-          when 0x50..0x5B
-            return load_str(io, control & 0xf)
+          when 0x50..0x5B, 0x5D..0x5F
+            return load_str(len)
           when 0x5C
             hashvalue = io.readchar.ord
             if @texthash[hashvalue]
               return @texthash[hashvalue]
             else
-              raise JKSNDecodeError.new('JKSN stream requires a non-existing hash: 0x%02x' % hashvalue)
+              raise DecodeError.new('JKSN stream requires a non-existing hash: 0x%02x' % hashvalue)
             end
-          when 0x5D
-            return load_str(io, decode_int(io, 2))
-          when 0x5E
-            return load_str(io, decode_int(io, 1))
-          when 0x5F
-            return load_str(io, decode_int(io, 0))
           end
         when 0x70 # Hashtable refreshers
-          raise NotImplementedError.new
+	  case control
+	  when 0x70
+	    @texthash.clear
+	    @blobhash.clear
+	  when 0x71..0x7F
+	    get_length(io, control).times { load_value(io) }
+	  end
         when 0x80 # Arrays
-          raise NotImplementedError.new
+	  len = get_length(io, control)
+	  return Array.new(len) { load_value(io) }
         when 0x90 # Objects
-          raise NotImplementedError.new
+	  len = get_length(io, control)
+	  result = {}
+	  len.times do
+	    key = load_value(io)
+	    value = load_value(io)
+	    result[key] = value
+	  end
+	  return result
         when 0xA0 # Row-col swapped arrays
-          raise NotImplementedError.new
+	  if control == 0xA0
+	    return UnspecifiedValue
+	  else
+	    return load_swapped_array(io, get_length(io, control))
+	  end
         when 0xC0 # Lengthless arrays
-          raise NotImplementedError.new
+	  if control == 0xC8
+	    result = []
+	    loop do
+	      item = load_value(io)
+	      if item != UnspecifiedValue
+		result << item
+	      else
+		return result
+	      end
+	    end
+	  end
         when 0xD0 # Delta encoded integers
-          raise NotImplementedError.new
+          delta = case control
+          when 0xD0..0xD5
+            control & 0x0F
+          when 0xD6..0xDA
+            (control & 0x0F) - 11
+          when 0xDB
+            decode_int(io, 4)
+          when 0xDC
+            decode_int(io, 2)
+          when 0xDD
+            decode_int(io, 1)
+          when 0xDE
+            -decode_int(io, 0)
+          when 0xDF
+            decode_int(io, 0)
+          end
+          if @lastint
+            return @lastint += delta
+          else
+            raise DecodeError.new('JKSN stream contains an invalid delta encoded integer')
+          end
         when 0xF0 # Checksums
+          chksum_length = [1, 4, 16, 20, 32, 64]
+          algo = [Digest::DJB, Digest::CRC32, Digest::MD5, Digest::SHA1, Digest::SHA256, Digest::SHA512]
           raise NotImplementedError.new
         else
           raise DecodeError.new('cannot decode JKSN from byte 0x%02x' % control)
@@ -217,6 +255,21 @@ module JKSN
       return result
     end
 
+    def get_length(io, control)
+      case control & 0x0F
+      when 0x01..0x0B
+	return control & 0x0F
+      when 0x0D
+	return decode_int(io, 2)
+      when 0x0E
+	return decode_int(io, 1)
+      when 0x0F
+	return decode_int(io, 0)
+      else
+	raise
+      end
+    end
+      
   end
 
   class IODieWhenEOFRead
@@ -239,4 +292,39 @@ module JKSN
     end
   end
 
+  module Digest
+    class CRC32
+      def initialize
+        @crc = Zlib::crc32
+      end
+      def update(str)
+        @crc = Zlib::crc32_combine(@crc, Zlib::crc32(str), str.length)
+        self
+      end
+      alias :<< :update
+      def digest_length
+        4
+      end
+      def inspect # :nodoc:
+        "#<%s %s>" % [self.class.name, '%08X' % @crc]
+      end
+    end
+    
+    class DJB
+      def initialize
+        @djb = ''.__jksn_djbhash
+      end
+      def update(str)
+        @djb = str.__jksn_djbhash(@djb)
+        self
+      end
+      alias :<< :update
+      def digest_length
+        1
+      end
+      def inspect # :nodoc:
+        "#<%s %s>" % [self.class.name, '%02X' % @djb]
+      end
+    end
+  end
 end

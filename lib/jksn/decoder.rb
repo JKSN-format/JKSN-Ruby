@@ -73,7 +73,7 @@ module JKSN
       loop do
         control = io.read(1).ord
         ctrlhi = control & 0xF0
-	ctrllo = control & 0x0F
+        ctrllo = control & 0x0F
         case ctrlhi
         when 0x00 # Special values
           case control
@@ -139,10 +139,10 @@ module JKSN
             return load_str(io, decode_int(io, 0) << 1, 'utf-16le')
           end
         when 0x40 # UTF-8 strings
-	  len = get_length(io, control)
+          len = get_length(io, control)
           return load_str(io, len, 'utf-8le')
         when 0x50 # Blob strings
-	  len = get_length(io, control)
+          len = get_length(io, control)
           case control
           when 0x50..0x5B, 0x5D..0x5F
             return load_str(len)
@@ -155,43 +155,43 @@ module JKSN
             end
           end
         when 0x70 # Hashtable refreshers
-	  case control
-	  when 0x70
-	    @texthash.clear
-	    @blobhash.clear
-	  when 0x71..0x7F
-	    get_length(io, control).times { load_value(io) }
-	  end
+          case control
+          when 0x70
+            @texthash.clear
+            @blobhash.clear
+          when 0x71..0x7F
+            get_length(io, control).times { load_value(io) }
+          end
         when 0x80 # Arrays
-	  len = get_length(io, control)
-	  return Array.new(len) { load_value(io) }
+          len = get_length(io, control)
+          return Array.new(len) { load_value(io) }
         when 0x90 # Objects
-	  len = get_length(io, control)
-	  result = {}
-	  len.times do
-	    key = load_value(io)
-	    value = load_value(io)
-	    result[key] = value
-	  end
-	  return result
+          len = get_length(io, control)
+          result = {}
+          len.times do
+            key = load_value(io)
+            value = load_value(io)
+            result[key] = value
+          end
+          return result
         when 0xA0 # Row-col swapped arrays
-	  if control == 0xA0
-	    return UnspecifiedValue
-	  else
-	    return load_swapped_array(io, get_length(io, control))
-	  end
+          if control == 0xA0
+            return UnspecifiedValue
+          else
+            return load_swapped_array(io, get_length(io, control))
+          end
         when 0xC0 # Lengthless arrays
-	  if control == 0xC8
-	    result = []
-	    loop do
-	      item = load_value(io)
-	      if item != UnspecifiedValue
-		result << item
-	      else
-		return result
-	      end
-	    end
-	  end
+          if control == 0xC8
+            result = []
+            loop do
+              item = load_value(io)
+              if item != UnspecifiedValue
+                result << item
+              else
+                return result
+              end
+            end
+          end
         when 0xD0 # Delta encoded integers
           delta = case control
           when 0xD0..0xD5
@@ -215,9 +215,34 @@ module JKSN
             raise DecodeError.new('JKSN stream contains an invalid delta encoded integer')
           end
         when 0xF0 # Checksums
+          warn 'JKSN checksum is not implemented, ignoring.'
           chksum_length = [1, 4, 16, 20, 32, 64]
-          algo = [Digest::DJB, Digest::CRC32, Digest::MD5, Digest::SHA1, Digest::SHA256, Digest::SHA512]
-          raise NotImplementedError.new
+          hasher = [Digest::DJB, Digest::CRC32, Digest::MD5, Digest::SHA1, Digest::SHA256, Digest::SHA512]
+          case control
+          when 0xF0..0xF5
+            i = control & 0x0F
+            checksum = io.read(chksum_length[i])
+            io = HashedIO.new(io, hasher[i])
+            result = load_value(io)
+            if io.digest == checksum
+              return result
+            else
+              raise ChecksumError.new
+            end
+          when 0xF8..0xFD
+            i = (control & 0x0F) - 0x08
+            ioh = HashedIO.new(io, hasher[i])
+            result = load_value(ioh)
+            checksum = ioh.read(chksum_length[i])
+            if io.digest == checksum
+              return result
+            else
+              raise ChecksumError.new
+            end
+          when 0xFF
+            load_value(io)
+          end
+          #raise NotImplementedError.new
         else
           raise DecodeError.new('cannot decode JKSN from byte 0x%02x' % control)
         end
@@ -265,27 +290,41 @@ module JKSN
     def get_length(io, control)
       case control & 0x0F
       when 0x01..0x0B
-	return control & 0x0F
+        return control & 0x0F
       when 0x0D
-	return decode_int(io, 2)
+        return decode_int(io, 2)
       when 0x0E
-	return decode_int(io, 1)
+        return decode_int(io, 1)
       when 0x0F
-	return decode_int(io, 0)
+        return decode_int(io, 0)
       else
-	raise
+        raise
       end
     end
-      
+    
+    def load_swapped_array(io, column_length)
+      result = []
+      column_length.times do
+        col_name = load_value io
+        col_values = load_value io
+        unless col_values.is_a? Array
+          raise DecodeError.new('JKSN row-col swapped array requires an array but found a ' + col_values.class.name)
+        end
+        col_values.each_with_index do |value, i|
+          result << [] if i == result.length
+          result[i] << [col_name, value] if value != UnspecifiedValue
+        end
+        result.map{|i| Hash[i] }.to_a
+    end
   end
 
   class IODieWhenEOFRead
     def initialize(io)
-      # StringIO is not IO
+      #warn 'nested IODieWhenEOFRead' if io.is_a? IODieWhenEOFRead
       @io = io
       @io.public_methods.each do |name|
         next if self.respond_to? name
-        self.define_singleton_method(name) { |*args, &block| @io.send(name, *args, &block) }
+        self.define_singleton_method(name) { |*args, &block| @io.__send__(name, *args, &block) }
       end
     end
 
@@ -299,6 +338,26 @@ module JKSN
     end
   end
 
+  class HashedIO
+    def initialize(io, digest_class)
+      #warn 'nested HashedIO' if io.is_a? HashedIO
+      @io = io
+      @io.public_methods.each do |name|
+        next if self.respond_to? name
+        self.define_singleton_method(name) { |*args, &block| @io.__send__(name, *args, &block) }
+      end
+      @hasher = digest_class.new
+    end
+
+    def read(length=nil, strbuf=nil)
+      result = @io.read(length, strbuf)
+      if result
+        @hasher << result
+      end
+      result
+    end
+  end
+  
   module Digest
     class CRC32
       def initialize
@@ -311,6 +370,22 @@ module JKSN
       alias :<< :update
       def digest_length
         4
+      end
+      def digest(str=nil)
+        if str
+          initialize
+          update str
+          result = @crc
+          initialize
+          return result
+        else
+          return @crc
+        end
+      end
+      def digest!
+        result = @crc
+        initialize
+        result
       end
       def inspect # :nodoc:
         "#<%s %s>" % [self.class.name, '%08X' % @crc]
@@ -328,6 +403,22 @@ module JKSN
       alias :<< :update
       def digest_length
         1
+      end
+      def digest(str=nil)
+        if str
+          initialize
+          update str
+          result = @djb
+          initialize
+          return result
+        else
+          return @djb
+        end
+      end
+      def digest!
+        result = @djb
+        initialize
+        result
       end
       def inspect # :nodoc:
         "#<%s %s>" % [self.class.name, '%02X' % @djb]

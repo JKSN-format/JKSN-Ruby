@@ -375,15 +375,15 @@ module JKSN
         if str
           initialize
           update str
-          result = @crc
+          result = @crc.pack('L>').first
           initialize
           return result
         else
-          return @crc
+          return @crc.pack('L>').first
         end
       end
       def digest!
-        result = @crc
+        result = @crc.pack('L>').first
         initialize
         result
       end
@@ -408,15 +408,15 @@ module JKSN
         if str
           initialize
           update str
-          result = @djb
+          result = @djb.chr
           initialize
           return result
         else
-          return @djb
+          return @djb.chr
         end
       end
       def digest!
-        result = @djb
+        result = @djb.chr
         initialize
         result
       end

@@ -247,7 +247,6 @@ class Array
   def __jksn_encode_swapped(circular_idlist=[])
     # row is Hash
     columns = Set.new(self.map(&:keys).flatten(1)).to_a
-    p self.map(&:keys).flatten(1), columns 
     if columns.length <= 0xc
       result = JKSN::JKSNProxy.new(self, 0xa0 | columns.length)
     elsif columns.length <= 0xff

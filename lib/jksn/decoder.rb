@@ -294,7 +294,6 @@ module JKSN
     end
 
     def get_length(io, control)
-      p '%02X'%control
       case control & 0x0F
       when 0x00..0x0C
         return control & 0x0F
@@ -318,7 +317,6 @@ module JKSN
           raise DecodeError.new('JKSN row-col swapped array requires an array but found a ' + col_values.class.name)
         end
         col_values.each_with_index do |value, i|
-          p value, i
           result << [] if i == result.length
           result[i] << [col_name, value] if value != UnspecifiedValue
         end

@@ -92,7 +92,7 @@ class Integer
 end
 
 class TrueClass
-  @@jksn_proxy = JKSN::JKSNProxy.new(self, 0x03)
+  @@jksn_proxy = ::JKSN::JKSNProxy.new(self, 0x03)
   @@jksn_proxy.freeze
   def __jksn_dump(*args)
     @@jksn_proxy
@@ -100,7 +100,7 @@ class TrueClass
 end
 
 class FalseClass
-  @@jksn_proxy = JKSN::JKSNProxy.new(self, 0x02)
+  @@jksn_proxy = ::JKSN::JKSNProxy.new(self, 0x02)
   @@jksn_proxy.freeze
   def __jksn_dump(*args)
     @@jksn_proxy
@@ -108,7 +108,7 @@ class FalseClass
 end
 
 class NilClass
-  @@jksn_proxy = JKSN::JKSNProxy.new(self, 0x01)
+  @@jksn_proxy = ::JKSN::JKSNProxy.new(self, 0x01)
   @@jksn_proxy.freeze
   def __jksn_dump(*args)
     @@jksn_proxy
@@ -246,22 +246,23 @@ class Array
 
   def __jksn_encode_swapped(circular_idlist=[])
     # row is Hash
-    columns = Set.new(self.map(&:keys).flatten)
-    if length <= 0xc
-      result = JKSN::JKSNProxy.new(self, 0xa0 | length)
-    elsif length <= 0xff
-      result = JKSN::JKSNProxy.new(self, 0xae, length.__jksn_encode(1))
-    elsif length <= 0xffff
-      result = JKSN::JKSNProxy.new(self, 0xad, length.__jksn_encode(2))
+    columns = Set.new(self.map(&:keys).flatten(1)).to_a
+    p self.map(&:keys).flatten(1), columns 
+    if columns.length <= 0xc
+      result = JKSN::JKSNProxy.new(self, 0xa0 | columns.length)
+    elsif columns.length <= 0xff
+      result = JKSN::JKSNProxy.new(self, 0xae, columns.length.__jksn_encode(1))
+    elsif columns.length <= 0xffff
+      result = JKSN::JKSNProxy.new(self, 0xad, columns.length.__jksn_encode(2))
     else
-      result = JKSN::JKSNProxy.new(self, 0xa8f, length.__jksn_encode(0))
+      result = JKSN::JKSNProxy.new(self, 0xa8f, columns.length.__jksn_encode(0))
     end
     columns.each do |column|
       __jksn_check_circular_helper(column, circular_idlist)
       result.children << column.__jksn_dump(circular_idlist)
       result.children << self.map{|row| row.fetch(column, JKSN::UnspecifiedValue)}.__jksn_dump(circular_idlist)
     end
-    raise unless result.children.length == length * 2
+    raise unless result.children.length == columns.length * 2
     return result
   end
 end

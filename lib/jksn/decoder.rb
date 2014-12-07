@@ -6,7 +6,7 @@
 # provided that the above copyright notice and this paragraph are
 # duplicated in all such forms and that any documentation,
 # advertising materials, and other materials related to such
-# distribution and use acknowledge that the software was originally 
+# distribution and use acknowledge that the software was originally
 # developed by StarBrilliant.
 # The name of StarBrilliant may not be used to endorse or promote
 # products derived from this software without specific prior written
@@ -17,12 +17,16 @@
 # WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 
 require 'stringio'
-require 'oj' rescue require 'json'
+begin
+  require 'oj'
+rescue LoadError
+  require 'json'
+end
 require 'zlib'
 begin
   require 'openssl'
-  Digest = OpenSSL::Digest
-rescue
+  JKSN::Digest = OpenSSL::Digest
+rescue LoadError
   require 'digest'
 end
 
@@ -62,10 +66,10 @@ module JKSN
     def load(io, header=true)
       if header
         if (header_from_io = io.read(3)) != '!jk'.b
-          io.seek(-header_from_io.length, :CUR)
+          io.seek(-header_from_io.length, IO::SEEK_CUR)
         end
       end
-      return load_value(IODieWhenEOFRead.from(io))
+      return load_value(IODieWhenEOFRead.new(io))
     end
 
     protected
@@ -74,6 +78,7 @@ module JKSN
         control = io.read(1).ord
         ctrlhi = control & 0xF0
         ctrllo = control & 0x0F
+        #binding.pry
         case ctrlhi
         when 0x00 # Special values
           case control
@@ -86,23 +91,23 @@ module JKSN
           when 0x0F
             s = load_value(io)
             raise DecodeError.new unless s.is_a? String
-            return JSON.parse s
+            return JSON.parse(s)
           end
         when 0x10 # Integers
           @lastint = case control
-            when 0x10..0x1A
-              control & 0x0F
-            when 0x1B
-              unsigned_to_signed(decode_int(io, 4), 32)
-            when 0x1C
-              unsigned_to_signed(decode_int(io, 2), 16)
-            when 0x1D
-              unsigned_to_signed(decode_int(io, 1), 8)
-            when 0x1E
-              -decode_int(io, 0)
-            when 0x1F
-              decode_int(io, 0)
-            end
+          when 0x10..0x1A
+            control & 0x0F
+          when 0x1B
+            unsigned_to_signed(decode_int(io, 4), 32)
+          when 0x1C
+            unsigned_to_signed(decode_int(io, 2), 16)
+          when 0x1D
+            unsigned_to_signed(decode_int(io, 1), 8)
+          when 0x1E
+            -decode_int(io, 0)
+          when 0x1F
+            decode_int(io, 0)
+          end
           return @lastint
 
         when 0x20 # Float point numbers
@@ -123,7 +128,7 @@ module JKSN
         when 0x30 # UTF-16 strings
           case control
           when 0x30..0x3B
-            return load_str(io, (control & 0xf) << 1, 'utf-16le')
+            return load_str(io, (control & 0xf) << 1, 'utf-16-le')
           when 0x3C
             hashvalue = io.readchar.ord
             if @texthash[hashvalue]
@@ -132,15 +137,15 @@ module JKSN
               raise JKSNDecodeError.new('JKSN stream requires a non-existing hash: 0x%02x' % hashvalue)
             end
           when 0x3D
-            return load_str(io, decode_int(io, 2) << 1, 'utf-16le')
+            return load_str(io, decode_int(io, 2) << 1, 'utf-16-le')
           when 0x3E
-            return load_str(io, decode_int(io, 1) << 1, 'utf-16le')
+            return load_str(io, decode_int(io, 1) << 1, 'utf-16-le')
           when 0x3F
-            return load_str(io, decode_int(io, 0) << 1, 'utf-16le')
+            return load_str(io, decode_int(io, 0) << 1, 'utf-16-le')
           end
         when 0x40 # UTF-8 strings
           len = get_length(io, control)
-          return load_str(io, len, 'utf-8le')
+          return load_str(io, len, 'utf-8')
         when 0x50 # Blob strings
           len = get_length(io, control)
           case control
@@ -246,6 +251,7 @@ module JKSN
         else
           raise DecodeError.new('cannot decode JKSN from byte 0x%02x' % control)
         end
+        return result
       end
 
     end
@@ -267,7 +273,7 @@ module JKSN
         end
         return result
       else
-        raise DecoderError.new
+        raise DecodeError.new
       end
     end
 
@@ -288,8 +294,9 @@ module JKSN
     end
 
     def get_length(io, control)
+      p '%02X'%control
       case control & 0x0F
-      when 0x01..0x0B
+      when 0x00..0x0C
         return control & 0x0F
       when 0x0D
         return decode_int(io, 2)
@@ -301,7 +308,7 @@ module JKSN
         raise
       end
     end
-    
+
     def load_swapped_array(io, column_length)
       result = []
       column_length.times do
@@ -311,117 +318,119 @@ module JKSN
           raise DecodeError.new('JKSN row-col swapped array requires an array but found a ' + col_values.class.name)
         end
         col_values.each_with_index do |value, i|
+          p value, i
           result << [] if i == result.length
           result[i] << [col_name, value] if value != UnspecifiedValue
         end
-        result.map{|i| Hash[i] }.to_a
-    end
-  end
-
-  class IODieWhenEOFRead
-    def initialize(io)
-      #warn 'nested IODieWhenEOFRead' if io.is_a? IODieWhenEOFRead
-      @io = io
-      @io.public_methods.each do |name|
-        next if self.respond_to? name
-        self.define_singleton_method(name) { |*args, &block| @io.__send__(name, *args, &block) }
       end
+      result.map{|i| Hash[i] }.to_a
     end
 
-    def read(length=nil, strbuf=nil)
-      result = @io.read(length, strbuf)
-      raise EOFError.new if result == nil or result == ""
-      if length != nil
-        raise EOFError.new if result.length < length
+    class IODieWhenEOFRead
+      def initialize(io)
+        #warn 'nested IODieWhenEOFRead' if io.is_a? IODieWhenEOFRead
+        @io = io
+        @io.public_methods.each do |name|
+          next if self.respond_to? name
+          self.define_singleton_method(name) { |*args, &block| @io.__send__(name, *args, &block) }
+        end
       end
-      return result
-    end
-  end
 
-  class HashedIO
-    def initialize(io, digest_class)
-      #warn 'nested HashedIO' if io.is_a? HashedIO
-      @io = io
-      @io.public_methods.each do |name|
-        next if self.respond_to? name
-        self.define_singleton_method(name) { |*args, &block| @io.__send__(name, *args, &block) }
+      def read(length=nil, strbuf=nil)
+        result = @io.read(length, strbuf)
+        raise EOFError.new if result == nil or result == ""
+        if length != nil
+          raise EOFError.new if result.length < length
+        end
+        return result
       end
-      @hasher = digest_class.new
     end
 
-    def read(length=nil, strbuf=nil)
-      result = @io.read(length, strbuf)
-      if result
-        @hasher << result
+    class HashedIO
+      def initialize(io, digest_class)
+        #warn 'nested HashedIO' if io.is_a? HashedIO
+        @io = io
+        @io.public_methods.each do |name|
+          next if self.respond_to? name
+          self.define_singleton_method(name) { |*args, &block| @io.__send__(name, *args, &block) }
+        end
+        @hasher = digest_class.new
       end
-      result
+
+      def read(length=nil, strbuf=nil)
+        result = @io.read(length, strbuf)
+        if result
+          @hasher << result
+        end
+        result
+      end
     end
-  end
-  
-  module Digest
-    class CRC32
-      def initialize
-        @crc = Zlib::crc32
-      end
-      def update(str)
-        @crc = Zlib::crc32_combine(@crc, Zlib::crc32(str), str.length)
-        self
-      end
-      alias :<< :update
-      def digest_length
-        4
-      end
-      def digest(str=nil)
-        if str
-          initialize
-          update str
+
+    module Digest
+      class CRC32
+        def initialize
+          @crc = Zlib::crc32
+        end
+        def update(str)
+          @crc = Zlib::crc32_combine(@crc, Zlib::crc32(str), str.length)
+          self
+        end
+        alias :<< :update
+        def digest_length
+          4
+        end
+        def digest(str=nil)
+          if str
+            initialize
+            update str
+            result = @crc.pack('L>').first
+            initialize
+            return result
+          else
+            return @crc.pack('L>').first
+          end
+        end
+        def digest!
           result = @crc.pack('L>').first
           initialize
-          return result
-        else
-          return @crc.pack('L>').first
+          result
+        end
+        def inspect # :nodoc:
+          "#<%s %s>" % [self.class.name, '%08X' % @crc]
         end
       end
-      def digest!
-        result = @crc.pack('L>').first
-        initialize
-        result
-      end
-      def inspect # :nodoc:
-        "#<%s %s>" % [self.class.name, '%08X' % @crc]
-      end
-    end
-    
-    class DJB
-      def initialize
-        @djb = ''.__jksn_djbhash
-      end
-      def update(str)
-        @djb = str.__jksn_djbhash(@djb)
-        self
-      end
-      alias :<< :update
-      def digest_length
-        1
-      end
-      def digest(str=nil)
-        if str
-          initialize
-          update str
+
+      class DJB
+        def initialize
+          @djb = ''.__jksn_djbhash
+        end
+        def update(str)
+          @djb = str.__jksn_djbhash(@djb)
+          self
+        end
+        alias :<< :update
+        def digest_length
+          1
+        end
+        def digest(str=nil)
+          if str
+            initialize
+            update str
+            result = @djb.chr
+            initialize
+            return result
+          else
+            return @djb.chr
+          end
+        end
+        def digest!
           result = @djb.chr
           initialize
-          return result
-        else
-          return @djb.chr
+          result
         end
-      end
-      def digest!
-        result = @djb.chr
-        initialize
-        result
-      end
-      def inspect # :nodoc:
-        "#<%s %s>" % [self.class.name, '%02X' % @djb]
+        def inspect # :nodoc:
+          "#<%s %s>" % [self.class.name, '%02X' % @djb]
+        end
       end
     end
   end

@@ -15,7 +15,7 @@
 # THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
 # IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
 # WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
-require 'jksn/types'
+
 
 module JKSN
 
@@ -77,6 +77,10 @@ module JKSN
       return result
     end
     alias :size :length
+
+    def inspect
+      children.empty? ? "#<JKSNProxy origin=#{@origin.inspect}>" : "#<JKSNProxy origin=#{@origin.inspect} children=#{@children.inspect}>"
+    end
   end
 
   class UnspecifiedValue

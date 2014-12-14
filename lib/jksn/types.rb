@@ -18,10 +18,6 @@
 #require 'jksn'
 
 class Object
-  def __jksn_dump(*args)
-    self.inspect.__jksn_dump(*args)
-  end
-
   protected
   def __jksn_check_circular_helper(obj, circular_idlist)
     if obj.respond_to?(:to_a) or obj.respond_to?(:to_h)
@@ -36,7 +32,11 @@ end
 
 
 class Integer
-  def __jksn_dump(*args)
+  def to_jksn
+    jksn_create.to_s
+  end
+  
+  def jksn_create(*args)
     if (0x00..0x0A).cover? self
       #return (self + 0x10).chr
       return JKSN::JKSNValue.new(self, self | 0x10)
@@ -47,12 +47,12 @@ class Integer
       #return [0x1c, self].pack('cs>')
       return JKSN::JKSNValue.new(self, 0x1c, __jksn_encode(2))
     elsif (0x20000000..0x7FFFFFFF).cover?(self) or (-0x80000000..-0x20000000).cover?(self)
-      return __jksn_dump_bignum
+      return jksn_create_bignum
     elsif (-2147483648...0x20000000).cover? self
       #return [0x1b, self].pack('cl>')
       return JKSN::JKSNValue.new(self, 0x1b, __jksn_encode(4))
     else
-      return __jksn_dump_bignum
+      return jksn_create_bignum
     end
   end
 
@@ -72,7 +72,7 @@ class Integer
   end
 
   private
-  def __jksn_dump_bignum
+  def jksn_create_bignum
     raise unless self != 0
     minus = (self < 0)
     return JKSN::JKSNValue.new(self, (minus ? 0x1e : 0x1f), self.abs.__jksn_encode_bignum)
@@ -92,31 +92,37 @@ class Integer
 end
 
 class TrueClass
-  @@jksn_value = ::JKSN::JKSNValue.new(self, 0x03)
-  @@jksn_value.freeze
-  def __jksn_dump(*args)
-    @@jksn_value
+  def to_jksn
+    jksn_create.to_s
+  end
+  def jksn_create(*args)
+    ::JKSN::JKSNValue.new(self, 0x03)
   end
 end
 
 class FalseClass
-  @@jksn_value = ::JKSN::JKSNValue.new(self, 0x02)
-  @@jksn_value.freeze
-  def __jksn_dump(*args)
-    @@jksn_value
+  def to_jksn
+    jksn_create.to_s
+  end
+  def jksn_create(*args)
+    ::JKSN::JKSNValue.new(self, 0x02)
   end
 end
 
 class NilClass
-  @@jksn_value = ::JKSN::JKSNValue.new(self, 0x01)
-  @@jksn_value.freeze
-  def __jksn_dump(*args)
-    @@jksn_value
+  def to_jksn
+    jksn_create.to_s
+  end
+  def jksn_create(*args)
+    ::JKSN::JKSNValue.new(self, 0x01)
   end
 end
 
 class Float
-  def __jksn_dump(*args)
+  def to_jksn
+    jksn_create.to_s
+  end
+  def jksn_create(*args)
     return JKSN::JKSNValue.new(self, 0x20) if self.nan?
     case self.infinite?
     when 1
@@ -130,11 +136,14 @@ class Float
 end
 
 class String
-  def __jksn_dump(*args)
+  def to_jksn
+    jksn_create.to_s
+  end
+  def jksn_create(*args)
     if self.encoding == Encoding::ASCII_8BIT
-      return __jksn_dump_blob
+      return jksn_create_blob
     else
-      return __jksn_dump_unicode
+      return jksn_create_unicode
     end
   end
 
@@ -149,7 +158,7 @@ class String
 
   #private
 
-  def __jksn_dump_blob
+  def jksn_create_blob
     if length <= 0xB
       result = JKSN::JKSNValue.new(self, 0x50 | length, '', self)
     elsif length <= 0xFF
@@ -163,7 +172,7 @@ class String
     return result
   end
 
-  def __jksn_dump_unicode
+  def jksn_create_unicode
     u16str = self.encode(Encoding::UTF_16LE)
     u8str  = self.encode(Encoding::UTF_8)
     short, control, enclength = (u16str.length < u8str.length) ? [u16str, 0x30, u16str.length << 1] : [u8str, 0x40, u8str.length]
@@ -182,7 +191,10 @@ class String
 end
 
 class Hash
-  def __jksn_dump(circular_idlist=[])
+  def to_jksn
+    jksn_create.optimize.to_s
+  end
+  def jksn_create(circular_idlist=[])
     if length <= 0xc
       result = JKSN::JKSNValue.new(self, 0x90 | length)
     elsif length <= 0xff
@@ -196,8 +208,8 @@ class Hash
       __jksn_check_circular_helper(key, circular_idlist)
       __jksn_check_circular_helper(value, circular_idlist)
 
-      result.children << key.__jksn_dump(circular_idlist)
-      result.children << value.__jksn_dump(circular_idlist)
+      result.children << key.jksn_create(circular_idlist)
+      result.children << value.jksn_create(circular_idlist)
 
     end
     raise unless result.children.length == length * 2
@@ -208,7 +220,10 @@ end
 
 require 'set'
 class Array
-  def __jksn_dump(circular_idlist=[])
+  def to_jksn
+    jksn_create.optimize.to_s
+  end
+  def jksn_create(circular_idlist=[])
     result = __jksn_encode_straight(circular_idlist)
     if __jksn_can_swap?
       result_swapped = __jksn_encode_swapped(circular_idlist)
@@ -238,7 +253,7 @@ class Array
     end
     self.each do |i|
       __jksn_check_circular_helper(i, circular_idlist)
-      result.children << i.__jksn_dump(circular_idlist)
+      result.children << i.jksn_create(circular_idlist)
     end
     raise unless result.children.length == length
     return result
@@ -258,8 +273,8 @@ class Array
     end
     columns.each do |column|
       __jksn_check_circular_helper(column, circular_idlist)
-      result.children << column.__jksn_dump(circular_idlist)
-      result.children << self.map{|row| row.fetch(column, JKSN::UnspecifiedValue)}.__jksn_dump(circular_idlist)
+      result.children << column.jksn_create(circular_idlist)
+      result.children << self.map{|row| row.fetch(column, JKSN::UnspecifiedValue)}.jksn_create(circular_idlist)
     end
     raise unless result.children.length == columns.length * 2
     return result

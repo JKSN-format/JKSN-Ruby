@@ -59,11 +59,10 @@ module JKSN
       @blobhash = {}
     end
 
-    def loads(s, header=true)
-      load(StringIO.new(s.b), header)
-    end
-
-    def load(io, header=true)
+    def parse(source, header=true)
+      if io.is_a? String
+        io = StringIO.new(s.b)
+      end
       if header
         if (header_from_io = io.read(3)) != '!jk'.b
           io.seek(-header_from_io.length, IO::SEEK_CUR)
@@ -71,7 +70,7 @@ module JKSN
       end
       return load_value(IODieWhenEOFRead.new(io))
     end
-
+    
     protected
     def load_value(io)
       loop do
@@ -220,7 +219,6 @@ module JKSN
             raise DecodeError.new('JKSN stream contains an invalid delta encoded integer')
           end
         when 0xF0 # Checksums
-          warn 'JKSN checksum is not implemented, ignoring.'
           chksum_length = [1, 4, 16, 20, 32, 64]
           hasher = [Digest::DJB, Digest::CRC32, Digest::MD5, Digest::SHA1, Digest::SHA256, Digest::SHA512]
           case control
@@ -247,7 +245,6 @@ module JKSN
           when 0xFF
             load_value(io)
           end
-          #raise NotImplementedError.new
         else
           raise DecodeError.new('cannot decode JKSN from byte 0x%02x' % control)
         end

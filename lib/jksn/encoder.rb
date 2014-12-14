@@ -29,13 +29,17 @@ module JKSN
 
   class << self
     # Dump an object into a buffer
-    def dumps(*args)
-      JKSNEncoder.new.dumps(*args)
+    def generate(obj, *args)
+      obj.to_jksn(*args)
     end
-
+    
     # Dump an object into a file object
-    def dump(*args)
-      JKSNEncoder.new.dump(*args)
+    def dump(obj, fp=nil, *args)
+      if fp.respond_to? :write
+        fp.write obj.to_jksn(*args)
+      else
+        obj.to_jksn(*args)
+      end
     end
   end
 
@@ -81,13 +85,25 @@ module JKSN
     def inspect
       children.empty? ? "#<JKSNValue origin=#{@origin.inspect}>" : "#<JKSNValue origin=#{@origin.inspect} children=#{@children.inspect}>"
     end
+    
+    def optimize
+      JKSNCrossValueOptimizer.optimize(self)
+    end
+    
+    def optimize!
+      obj = optimize
+      @control = obj.control
+      @data = obj.data
+      @buf = obj.buf
+      @children.replace obj.children
+      @hash = obj.hash
+      self
+    end
   end
 
   class UnspecifiedValue
-    @@jksn_value = JKSNValue.new(nil, 0xa0)
-    @@jksn_value.freeze
     def self.__jksn_dump(*args)
-      @@jksn_value
+      JKSNValue.new(nil, 0xa0)
     end
   end
 

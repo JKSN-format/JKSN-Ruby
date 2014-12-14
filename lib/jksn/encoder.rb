@@ -91,7 +91,15 @@ module JKSN
     end
   end
 
-  class JKSNEncoder
+  class JKSNCrossValueOptimizer
+    
+    class << self
+      def optimize(value)
+        self.new.optimize(value)
+      end
+    end
+    
+    end
     def initialize
       @lastint = nil
       @texthash = [nil] * 256

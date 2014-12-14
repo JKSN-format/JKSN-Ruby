@@ -39,18 +39,18 @@ class Integer
   def __jksn_dump(*args)
     if (0x00..0x0A).cover? self
       #return (self + 0x10).chr
-      return JKSN::JKSNProxy.new(self, self | 0x10)
+      return JKSN::JKSNValue.new(self, self | 0x10)
     elsif (-128..127).cover? self
       #return [0x1d, self].pack('cc')
-      return JKSN::JKSNProxy.new(self, 0x1d, __jksn_encode(1))
+      return JKSN::JKSNValue.new(self, 0x1d, __jksn_encode(1))
     elsif (-32767..32768).cover? self
       #return [0x1c, self].pack('cs>')
-      return JKSN::JKSNProxy.new(self, 0x1c, __jksn_encode(2))
+      return JKSN::JKSNValue.new(self, 0x1c, __jksn_encode(2))
     elsif (0x20000000..0x7FFFFFFF).cover?(self) or (-0x80000000..-0x20000000).cover?(self)
       return __jksn_dump_bignum
     elsif (-2147483648...0x20000000).cover? self
       #return [0x1b, self].pack('cl>')
-      return JKSN::JKSNProxy.new(self, 0x1b, __jksn_encode(4))
+      return JKSN::JKSNValue.new(self, 0x1b, __jksn_encode(4))
     else
       return __jksn_dump_bignum
     end
@@ -75,7 +75,7 @@ class Integer
   def __jksn_dump_bignum
     raise unless self != 0
     minus = (self < 0)
-    return JKSN::JKSNProxy.new(self, (minus ? 0x1e : 0x1f), self.abs.__jksn_encode_bignum)
+    return JKSN::JKSNValue.new(self, (minus ? 0x1e : 0x1f), self.abs.__jksn_encode_bignum)
   end
 
   def __jksn_encode_bignum(num)
@@ -92,39 +92,39 @@ class Integer
 end
 
 class TrueClass
-  @@jksn_proxy = ::JKSN::JKSNProxy.new(self, 0x03)
-  @@jksn_proxy.freeze
+  @@jksn_value = ::JKSN::JKSNValue.new(self, 0x03)
+  @@jksn_value.freeze
   def __jksn_dump(*args)
-    @@jksn_proxy
+    @@jksn_value
   end
 end
 
 class FalseClass
-  @@jksn_proxy = ::JKSN::JKSNProxy.new(self, 0x02)
-  @@jksn_proxy.freeze
+  @@jksn_value = ::JKSN::JKSNValue.new(self, 0x02)
+  @@jksn_value.freeze
   def __jksn_dump(*args)
-    @@jksn_proxy
+    @@jksn_value
   end
 end
 
 class NilClass
-  @@jksn_proxy = ::JKSN::JKSNProxy.new(self, 0x01)
-  @@jksn_proxy.freeze
+  @@jksn_value = ::JKSN::JKSNValue.new(self, 0x01)
+  @@jksn_value.freeze
   def __jksn_dump(*args)
-    @@jksn_proxy
+    @@jksn_value
   end
 end
 
 class Float
   def __jksn_dump(*args)
-    return JKSN::JKSNProxy.new(self, 0x20) if self.nan?
+    return JKSN::JKSNValue.new(self, 0x20) if self.nan?
     case self.infinite?
     when 1
-      return JKSN::JKSNProxy.new(self, 0x2f)
+      return JKSN::JKSNValue.new(self, 0x2f)
     when -1
-      return JKSN::JKSNProxy.new(self, 0x2e)
+      return JKSN::JKSNValue.new(self, 0x2e)
     else
-      return JKSN::JKSNProxy.new(self, 0x2c, [self].pack('G')[0])
+      return JKSN::JKSNValue.new(self, 0x2c, [self].pack('G')[0])
     end
   end
 end
@@ -151,13 +151,13 @@ class String
 
   def __jksn_dump_blob
     if length <= 0xB
-      result = JKSN::JKSNProxy.new(self, 0x50 | length, '', self)
+      result = JKSN::JKSNValue.new(self, 0x50 | length, '', self)
     elsif length <= 0xFF
-      result = JKSN::JKSNProxy.new(self, 0x5e, length.__jksn_encode(1), self)
+      result = JKSN::JKSNValue.new(self, 0x5e, length.__jksn_encode(1), self)
     elsif length <= 0xFFFF
-      result = JKSN::JKSNProxy.new(self, 0x5d, length.__jksn_encode(2), self)
+      result = JKSN::JKSNValue.new(self, 0x5d, length.__jksn_encode(2), self)
     else
-      result = JKSN::JKSNProxy.new(self, 0x5f, length.__jksn_encode(0), self)
+      result = JKSN::JKSNValue.new(self, 0x5f, length.__jksn_encode(0), self)
     end
     result.hash = __jksn_djbhash
     return result
@@ -168,13 +168,13 @@ class String
     u8str  = self.encode(Encoding::UTF_8)
     short, control, enclength = (u16str.length < u8str.length) ? [u16str, 0x30, u16str.length << 1] : [u8str, 0x40, u8str.length]
     if enclength <= (control == 0x40 ? 0xc : 0xb)
-      result = JKSN::JKSNProxy.new(self, control | length, '', short)
+      result = JKSN::JKSNValue.new(self, control | length, '', short)
     elsif enclength <= 0xFF
-      result = JKSN::JKSNProxy.new(self, control | 0x0e, length.__jksn_encode(1), short)
+      result = JKSN::JKSNValue.new(self, control | 0x0e, length.__jksn_encode(1), short)
     elsif enclength <= 0xFFFF
-      result = JKSN::JKSNProxy.new(self, control | 0x0d, length.__jksn_encode(2), short)
+      result = JKSN::JKSNValue.new(self, control | 0x0d, length.__jksn_encode(2), short)
     else
-      result = JKSN::JKSNProxy.new(self, control | 0x0f, length.__jksn_encode(0), short)
+      result = JKSN::JKSNValue.new(self, control | 0x0f, length.__jksn_encode(0), short)
     end
     result.hash = short.__jksn_djbhash
     return result
@@ -184,13 +184,13 @@ end
 class Hash
   def __jksn_dump(circular_idlist=[])
     if length <= 0xc
-      result = JKSN::JKSNProxy.new(self, 0x90 | length)
+      result = JKSN::JKSNValue.new(self, 0x90 | length)
     elsif length <= 0xff
-      result = JKSN::JKSNProxy.new(self, 0x9e, length.__jksn_encode(1))
+      result = JKSN::JKSNValue.new(self, 0x9e, length.__jksn_encode(1))
     elsif length <= 0xffff
-      result = JKSN::JKSNProxy.new(self, 0x9d, length.__jksn_encode(2))
+      result = JKSN::JKSNValue.new(self, 0x9d, length.__jksn_encode(2))
     else
-      result = JKSN::JKSNProxy.new(self, 0x9f, length.__jksn_encode(0))
+      result = JKSN::JKSNValue.new(self, 0x9f, length.__jksn_encode(0))
     end
     self.each do |key, value|
       __jksn_check_circular_helper(key, circular_idlist)
@@ -228,13 +228,13 @@ class Array
 
   def __jksn_encode_straight(circular_idlist=[])
     if length <= 0xc
-      result = JKSN::JKSNProxy.new(self, 0x80 | length)
+      result = JKSN::JKSNValue.new(self, 0x80 | length)
     elsif length <= 0xff
-      result = JKSN::JKSNProxy.new(self, 0x8e, length.__jksn_encode(1))
+      result = JKSN::JKSNValue.new(self, 0x8e, length.__jksn_encode(1))
     elsif length <= 0xffff
-      result = JKSN::JKSNProxy.new(self, 0x8d, length.__jksn_encode(2))
+      result = JKSN::JKSNValue.new(self, 0x8d, length.__jksn_encode(2))
     else
-      result = JKSN::JKSNProxy.new(self, 0x8f, length.__jksn_encode(0))
+      result = JKSN::JKSNValue.new(self, 0x8f, length.__jksn_encode(0))
     end
     self.each do |i|
       __jksn_check_circular_helper(i, circular_idlist)
@@ -248,13 +248,13 @@ class Array
     # row is Hash
     columns = Set.new(self.map(&:keys).flatten(1)).to_a
     if columns.length <= 0xc
-      result = JKSN::JKSNProxy.new(self, 0xa0 | columns.length)
+      result = JKSN::JKSNValue.new(self, 0xa0 | columns.length)
     elsif columns.length <= 0xff
-      result = JKSN::JKSNProxy.new(self, 0xae, columns.length.__jksn_encode(1))
+      result = JKSN::JKSNValue.new(self, 0xae, columns.length.__jksn_encode(1))
     elsif columns.length <= 0xffff
-      result = JKSN::JKSNProxy.new(self, 0xad, columns.length.__jksn_encode(2))
+      result = JKSN::JKSNValue.new(self, 0xad, columns.length.__jksn_encode(2))
     else
-      result = JKSN::JKSNProxy.new(self, 0xa8f, columns.length.__jksn_encode(0))
+      result = JKSN::JKSNValue.new(self, 0xa8f, columns.length.__jksn_encode(0))
     end
     columns.each do |column|
       __jksn_check_circular_helper(column, circular_idlist)

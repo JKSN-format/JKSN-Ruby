@@ -39,7 +39,7 @@ module JKSN
     end
   end
 
-  class JKSNProxy
+  class JKSNValue
     attr_accessor :origin
     attr_accessor :control
     attr_accessor :data
@@ -79,15 +79,15 @@ module JKSN
     alias :size :length
 
     def inspect
-      children.empty? ? "#<JKSNProxy origin=#{@origin.inspect}>" : "#<JKSNProxy origin=#{@origin.inspect} children=#{@children.inspect}>"
+      children.empty? ? "#<JKSNValue origin=#{@origin.inspect}>" : "#<JKSNValue origin=#{@origin.inspect} children=#{@children.inspect}>"
     end
   end
 
   class UnspecifiedValue
-    @@jksn_proxy = JKSNProxy.new(nil, 0xa0)
-    @@jksn_proxy.freeze
+    @@jksn_value = JKSNValue.new(nil, 0xa0)
+    @@jksn_value.freeze
     def self.__jksn_dump(*args)
-      @@jksn_proxy
+      @@jksn_value
     end
   end
 
@@ -107,7 +107,7 @@ module JKSN
     end
 
     def dumps(obj, header=true)
-      result = dump_to_proxy(obj)
+      result = dump_to_value(obj)
       return header ? ('jk!'.b + result.to_s) : result.to_s
     end
 
@@ -115,18 +115,18 @@ module JKSN
       fd.write(dumps(obj, header))
     end
 
-    def dump_to_proxy(obj)
+    def dump_to_value(obj)
       optimize(obj.__jksn_dump)
     end
 
-    def optimize(proxyobj)
+    def optimize(valueobj)
       # TODO
-      control = proxyobj.control & 0xF0
+      control = valueobj.control & 0xF0
       case control
       when 0x10
         if !@lastint.nil?
-          delta = proxyobj.origin - @lastint
-          if delta.abs < proxyobj.origin.abs
+          delta = valueobj.origin - @lastint
+          if delta.abs < valueobj.origin.abs
             if (0..0x5).cover? delta
               new_control, new_data = 0xd0 | delta, ''.b
             elsif (-0x05..-0x01).cover? delta
@@ -142,33 +142,33 @@ module JKSN
             else
               new_control, new_data = 0xde, (-delta).__jksn_encode(0)
             end
-            if new_data.length < proxyobj.data.length
-              proxyobj.control, proxyobj.data = new_control, new_data
+            if new_data.length < valueobj.data.length
+              valueobj.control, valueobj.data = new_control, new_data
             end
-            @lastint = proxyobj.origin
+            @lastint = valueobj.origin
           end
         end
       when 0x30, 0x40
-        if proxyobj.buf.length > 1
-          if @texthash[proxyobj.hash] == proxyobj.buf
-            proxyobj.control, proxyobj.data, proxyobj.buf = 0x3c, proxyobj.hash.__jksn_encode(1), ''.b
+        if valueobj.buf.length > 1
+          if @texthash[valueobj.hash] == valueobj.buf
+            valueobj.control, valueobj.data, valueobj.buf = 0x3c, valueobj.hash.__jksn_encode(1), ''.b
           else
-            @texthash[proxyobj.hash] = proxyobj.buf
+            @texthash[valueobj.hash] = valueobj.buf
           end
         end
       when 0x50
-        if proxyobj.buf.length > 1
-          if @blobhash[proxyobj.hash] == proxyobj.buf
-            proxyobj.control, proxyobj.data, proxyobj.buf = 0x5c, proxyobj.hash.__jksn_encode(1), ''.b
+        if valueobj.buf.length > 1
+          if @blobhash[valueobj.hash] == valueobj.buf
+            valueobj.control, valueobj.data, valueobj.buf = 0x5c, valueobj.hash.__jksn_encode(1), ''.b
           else
-            @blobhash[proxyobj.hash] = proxyobj.buf
+            @blobhash[valueobj.hash] = valueobj.buf
           end
         end
       else
-        proxyobj.children.each { |child| optimize(child) }
+        valueobj.children.each { |child| optimize(child) }
       end
 
-      return proxyobj
+      return valueobj
     end
 
   end

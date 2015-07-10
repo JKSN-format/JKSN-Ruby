@@ -6,7 +6,7 @@
 # provided that the above copyright notice and this paragraph are
 # duplicated in all such forms and that any documentation,
 # advertising materials, and other materials related to such
-# distribution and use acknowledge that the software was originally 
+# distribution and use acknowledge that the software was originally
 # developed by StarBrilliant.
 # The name of StarBrilliant may not be used to endorse or promote
 # products derived from this software without specific prior written
@@ -32,7 +32,7 @@ module JKSN
     def generate(obj, *args)
       obj.to_jksn(*args)
     end
-    
+
     # Dump an object into a file object
     def dump(obj, fp=nil, *args)
       if fp.respond_to? :write
@@ -85,11 +85,11 @@ module JKSN
     def inspect
       children.empty? ? "#<JKSNValue origin=#{@origin.inspect}>" : "#<JKSNValue origin=#{@origin.inspect} children=#{@children.inspect}>"
     end
-    
+
     def optimize
       JKSNCrossValueOptimizer.optimize(self)
     end
-    
+
     def optimize!
       obj = optimize
       @control = obj.control
@@ -108,18 +108,18 @@ module JKSN
   end
 
   class JKSNCrossValueOptimizer
-    
+
     class << self
       def optimize(value)
         self.new.optimize(value)
       end
     end
-    
-    end
+
+
     def initialize
       @lastint = nil
-      @texthash = [nil] * 256
-      @blobhash = [nil] * 256
+      @texthash = {}
+      @blobhash = {}
     end
 
     def dumps(obj, header=true)
@@ -186,8 +186,5 @@ module JKSN
 
       return valueobj
     end
-
   end
-
 end
-

@@ -17,19 +17,6 @@
 # WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 #require 'jksn'
 
-class Object
-  protected
-  def __jksn_check_circular_helper(obj, circular_idlist)
-    if obj.respond_to?(:to_a) or obj.respond_to?(:to_h)
-      if circular_idlist.include? obj.object_id
-        raise JKSN::EncodeError.new('circular reference found')
-      else
-        circular_idlist << obj.object_id
-      end
-    end
-  end
-end
-
 
 class Integer
   def to_jksn
@@ -139,24 +126,22 @@ class String
   def to_jksn
     jksn_create.to_s
   end
-  def jksn_create(*args)
-    if self.encoding == Encoding::ASCII_8BIT
+  def jksn_create(state=nil)
+    state = JKSN::EncoderState.from_state(state)
+    if state.force_string_encoding == :blob || self.encoding == Encoding::ASCII_8BIT
       return jksn_create_blob
     else
-      return jksn_create_unicode
+      return jksn_create_unicode(state)
     end
   end
 
   def __jksn_djbhash(iv=0)
-    result = iv
-    self.each_byte do |i|
-      result += (result << 5) + i
-      result &= 0xFF
+    self.each_byte.reduce(iv) do |a,b|
+      ((a << 5) + b) & 0xFF
     end
-    return result
   end
 
-  #private
+  private
 
   def jksn_create_blob
     if length <= 0xB
@@ -168,14 +153,25 @@ class String
     else
       result = JKSN::JKSNValue.new(self, 0x5f, length.__jksn_encode(0), self)
     end
-    result.hash = __jksn_djbhash
+    result.data_hash = __jksn_djbhash
     return result
   end
 
-  def jksn_create_unicode
-    u16str = self.encode(Encoding::UTF_16LE)
-    u8str  = self.encode(Encoding::UTF_8)
-    short, control, enclength = (u16str.length < u8str.length) ? [u16str, 0x30, u16str.length << 1] : [u8str, 0x40, u8str.length]
+  def jksn_create_unicode(state)
+
+    case state.force_string_encoding
+    when :utf8
+      str = self.encode(Encoding::UTF_8)
+      control, enclength = 0x40, str.length
+    when :utf16
+      str = self.encode(Encoding::UTF_16LE)
+      control, enclength = 0x30, u16str.length << 1
+    else
+      u16str = self.encode(Encoding::UTF_16LE)
+      u8str  = self.encode(Encoding::UTF_8)
+      str, control, enclength = (u16str.length < u8str.length) ? [u16str, 0x30, u16str.length << 1] : [u8str, 0x40, u8str.length]
+    end
+
     if enclength <= (control == 0x40 ? 0xc : 0xb)
       result = JKSN::JKSNValue.new(self, control | length, '', short)
     elsif enclength <= 0xFF
@@ -185,7 +181,7 @@ class String
     else
       result = JKSN::JKSNValue.new(self, control | 0x0f, length.__jksn_encode(0), short)
     end
-    result.hash = short.__jksn_djbhash
+    result.data_hash = short.__jksn_djbhash
     return result
   end
 end
@@ -194,7 +190,8 @@ class Hash
   def to_jksn
     jksn_create.optimize.to_s
   end
-  def jksn_create(circular_idlist=[])
+  def jksn_create(state=nil)
+    state = JKSN::EncoderState.from_state(state)
     if length <= 0xc
       result = JKSN::JKSNValue.new(self, 0x90 | length)
     elsif length <= 0xff
@@ -204,29 +201,28 @@ class Hash
     else
       result = JKSN::JKSNValue.new(self, 0x9f, length.__jksn_encode(0))
     end
+    state.inc_depth
     self.each do |key, value|
-      __jksn_check_circular_helper(key, circular_idlist)
-      __jksn_check_circular_helper(value, circular_idlist)
-
-      result.children << key.jksn_create(circular_idlist)
-      result.children << value.jksn_create(circular_idlist)
-
+      result.children << key.jksn_create(state)
+      result.children << value.jksn_create(state)
     end
+    state.dec_depth
     raise unless result.children.length == length * 2
     return result
   end
 end
 
 
-require 'set'
 class Array
   def to_jksn
     jksn_create.optimize.to_s
   end
-  def jksn_create(circular_idlist=[])
-    result = __jksn_encode_straight(circular_idlist)
+  def jksn_create(state=nil)
+    state = JKSN::EncoderState.from_state(state)
+    result = jksn_create_straight(state)
+    return result if state.swapped_array_disabled?
     if __jksn_can_swap?
-      result_swapped = __jksn_encode_swapped(circular_idlist)
+      result_swapped = jksn_create_swapped(state)
       result = result_swapped if result_swapped.length(3) < result.length(3)
     end
     return result
@@ -241,7 +237,8 @@ class Array
     return columns
   end
 
-  def __jksn_encode_straight(circular_idlist=[])
+  def jksn_create_straight(state=nil)
+    state = JKSN::EncoderState.from_state(state)
     if length <= 0xc
       result = JKSN::JKSNValue.new(self, 0x80 | length)
     elsif length <= 0xff
@@ -251,17 +248,19 @@ class Array
     else
       result = JKSN::JKSNValue.new(self, 0x8f, length.__jksn_encode(0))
     end
+    state.inc_depth
     self.each do |i|
-      __jksn_check_circular_helper(i, circular_idlist)
-      result.children << i.jksn_create(circular_idlist)
+      result.children << i.jksn_create(state)
     end
+    state.dec_depth
     raise unless result.children.length == length
     return result
   end
 
-  def __jksn_encode_swapped(circular_idlist=[])
+  def jksn_create_swapped(state=nil)
+    state = JKSN::EncoderState.from_state(state)
     # row is Hash
-    columns = Set.new(self.map(&:keys).flatten(1)).to_a
+    columns = self.map(&:keys).flatten(1).uniq
     if columns.length <= 0xc
       result = JKSN::JKSNValue.new(self, 0xa0 | columns.length)
     elsif columns.length <= 0xff
@@ -271,11 +270,12 @@ class Array
     else
       result = JKSN::JKSNValue.new(self, 0xa8f, columns.length.__jksn_encode(0))
     end
+    state.inc_depth
     columns.each do |column|
-      __jksn_check_circular_helper(column, circular_idlist)
-      result.children << column.jksn_create(circular_idlist)
-      result.children << self.map{|row| row.fetch(column, JKSN::UnspecifiedValue)}.jksn_create(circular_idlist)
+      result.children << column.jksn_create(state)
+      result.children << self.map{|row| row.fetch(column, JKSN::UnspecifiedValue)}.jksn_create(state)
     end
+    state.dec_depth
     raise unless result.children.length == columns.length * 2
     return result
   end

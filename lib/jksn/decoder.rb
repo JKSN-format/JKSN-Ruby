@@ -17,11 +17,7 @@
 # WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 
 require 'stringio'
-begin
-  require 'oj'
-rescue LoadError
-  require 'json'
-end
+require 'json'
 require 'zlib'
 begin
   require 'openssl'
@@ -68,7 +64,7 @@ module JKSN
           io.seek(-header_from_io.length, IO::SEEK_CUR)
         end
       end
-      return load_value(IODieWhenEOFRead.new(io))
+      return load_value(IODieOnEOF.new(io))
     end
     
     protected
@@ -184,8 +180,9 @@ module JKSN
           else
             return load_swapped_array(io, get_length(io, control))
           end
-        when 0xC0 # Lengthless arrays
-          if control == 0xC8
+        when 0xC0
+          case control
+          when 0xC8 # Lengthless arrays
             result = []
             loop do
               item = load_value(io)
@@ -195,6 +192,8 @@ module JKSN
                 return result
               end
             end
+          when 0xCA # padding
+            next
           end
         when 0xD0 # Delta encoded integers
           delta = case control
@@ -321,9 +320,9 @@ module JKSN
       result.map{|i| Hash[i] }.to_a
     end
 
-    class IODieWhenEOFRead
+    class IODieOnEOF
       def initialize(io)
-        #warn 'nested IODieWhenEOFRead' if io.is_a? IODieWhenEOFRead
+        #warn 'nested IODieOnEOF' if io.is_a? IODieOnEOF
         @io = io
         @io.public_methods.each do |name|
           next if self.respond_to? name
@@ -358,6 +357,10 @@ module JKSN
           @hasher << result
         end
         result
+      end
+      
+      def digest
+          @hasher.digest
       end
     end
 

@@ -20,7 +20,12 @@
 module JKSN
 
   # Exception class raised during JKSN encoding and decoding
-  class JKSNError < RuntimeError
+  class JKSNError < StandardError
+    def self.wrap(exception)
+      obj = new("Wrapped(#{exception.class}): #{exception.message.inspect}")
+      obj.set_backtrace exception.backtrace
+      obj
+    end
   end
 
   # Exception class raised during JKSN encoding
@@ -43,12 +48,118 @@ module JKSN
     end
   end
 
+  class EncoderState
+    def self.from_state(obj)
+      case
+      when self == obj
+        obj
+      when obj.respond_to?(:to_hash)
+        new obj.to_hash
+      when obj.respond_to?(:to_h)
+        new obj.to_h
+      else
+        new
+      end
+    end
+
+    def initialize(opts={})
+      configure opts
+    end
+
+    attr_accessor *%i(allow_nan depth disable_swapped_array force_string_encoding)
+
+    def configure(opts)
+      if opts.respond_to?(:to_hash)
+        opts = opts.to_hash
+      elsif opts.respond_to?(:to_h)
+        opts = opts.to_h
+      else
+        raise TypeError, "can't convert #{opts.class} into Hash"
+      end
+      for key, value in opts
+        instance_variable_set "@#{key}", value
+      end
+
+      @allow_nan             = !!opts[:allow_nan] if opts.key?(:allow_nan)
+      @depth                 = opts[:depth] || 0
+      @disable_swapped_array = opts[:disable_swapped_array] || false
+      @force_string_encoding = opts[:force_string_encoding] || nil # :blob, :unicode, :utf8, :utf16
+
+      if !opts.key?(:max_nesting) # defaults to 100
+        @max_nesting = 100
+      elsif opts[:max_nesting]
+        @max_nesting = opts[:max_nesting]
+      else
+        @max_nesting = 0
+      end
+      self
+    end
+
+    def check_circular?
+      !@max_nesting.zero?
+    end
+
+    # Returns true if NaN, Infinity, and -Infinity should be considered as
+    # valid JKSN and output.
+    def allow_nan?
+      @allow_nan
+    end
+
+    def swapped_array_disabled?
+      @disable_swapped_array
+    end
+
+    def check_max_nesting
+      return if @max_nesting.zero?
+      current_nesting = depth + 1
+      if current_nesting > @max_nesting
+        raise EncodeError, "nesting of #{current_nesting} is too deep"
+      end
+    end
+
+    def to_h
+      result = {}
+      for iv in instance_variables
+        iv = iv.to_s[1..-1]
+        result[iv.to_sym] = self[iv]
+      end
+      result
+    end
+
+    def inc_depth
+      self.depth += 1
+      check_max_nesting
+    end
+
+    def dec_depth
+      self.depth -= 1
+    end
+
+    # Return the value returned by method +name+.
+    def [](name)
+      if respond_to?(name)
+        __send__(name)
+      else
+        instance_variable_get("@#{name}")
+      end
+    end
+
+    def []=(name, value)
+      if respond_to?(name_writer = "#{name}=")
+        __send__ name_writer, value
+      else
+        instance_variable_set "@#{name}", value
+      end
+    end
+
+  end
+
   class JKSNValue
     attr_accessor :origin
     attr_accessor :control
     attr_accessor :data
     attr_accessor :buf
-    attr_accessor :hash
+    attr_accessor :data_hash
     attr_accessor :children
     def initialize(origin, control, data='', buf='')
       raise unless control.is_a?(Fixnum) && (0..255).cover?(control)
@@ -96,7 +207,7 @@ module JKSN
       @data = obj.data
       @buf = obj.buf
       @children.replace obj.children
-      @hash = obj.hash
+      @hash = obj.data_hash
       self
     end
   end
@@ -136,7 +247,6 @@ module JKSN
     end
 
     def optimize(valueobj)
-      # TODO
       control = valueobj.control & 0xF0
       case control
       when 0x10
@@ -166,18 +276,18 @@ module JKSN
         end
       when 0x30, 0x40
         if valueobj.buf.length > 1
-          if @texthash[valueobj.hash] == valueobj.buf
-            valueobj.control, valueobj.data, valueobj.buf = 0x3c, valueobj.hash.__jksn_encode(1), ''.b
+          if @texthash[valueobj.data_hash] == valueobj.buf
+            valueobj.control, valueobj.data, valueobj.buf = 0x3c, valueobj.data_hash.__jksn_encode(1), ''.b
           else
-            @texthash[valueobj.hash] = valueobj.buf
+            @texthash[valueobj.data_hash] = valueobj.buf
           end
         end
       when 0x50
         if valueobj.buf.length > 1
-          if @blobhash[valueobj.hash] == valueobj.buf
-            valueobj.control, valueobj.data, valueobj.buf = 0x5c, valueobj.hash.__jksn_encode(1), ''.b
+          if @blobhash[valueobj.data_hash] == valueobj.buf
+            valueobj.control, valueobj.data, valueobj.buf = 0x5c, valueobj.data_hash.__jksn_encode(1), ''.b
           else
-            @blobhash[valueobj.hash] = valueobj.buf
+            @blobhash[valueobj.data_hash] = valueobj.buf
           end
         end
       else
